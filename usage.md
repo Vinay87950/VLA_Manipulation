@@ -5,3 +5,5 @@ Reference from here - 'https://robosuite.ai/docs/modules/robots.html'
 2. During a given simulation call (env.step(...)), the environment will receive a set of actions and distribute them accordingly to each robot, according to their respective action spaces. Each robot then converts these actions into low-level torques via their respective controllers, and directly executes these torques in the simulation
 
 Now for the Robosuite Objects - 'https://robosuite.ai/docs/modules/objects.html'
+
+the stl files are downloaded from 'https://www.thingiverse.com/thing:7115554'

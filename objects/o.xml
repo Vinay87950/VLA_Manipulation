@@ -1,0 +1,21 @@
+<mujoco model="o_piece">
+  <asset>
+    <mesh file="/Users/killuaa/Desktop/mujoco_sim/self_environment/stl_things/files/O_env.stl" name="o_mesh" scale="0.002 0.002 0.003"/>  <!-- Adjust to 0.8 if STL in meters -->
+    <texture file="/Users/killuaa/Desktop/mujoco_sim/self_environment/stl_things/images/Part_Studio_1_-_o_x5.png" type="2d" name="tex-o" />
+    <material name="o_material" reflectance="0.7" rgba="0.1 0.4 0.8 1"/>
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <!-- Visual geom: Mesh for appearance, no contacts -->
+        <geom pos="0 0 0" mesh="o_mesh" type="mesh" material="o_material" group="1" contype="0" conaffinity="0"/>
+        <!-- Collision geom: Approximate O with cylinder for convexity (adjust size) -->
+        <geom pos="0 0 0" type="cylinder" size="0.01 0.0075" solimp="0.998 0.998 0.001" solref="0.001 1" density="1000" friction="0.95 0.3 0.1" group="0" condim="4" rgba="0 0 0 0"/>  <!-- Radius and half-height -->
+        <inertial pos="0 0 0" mass="0.1" diaginertia="0.001 0.001 0.001"/>  <!-- Adjust mass based on size -->
+      </body>
+      <site rgba="0 0 0 0" size="0.005" pos="0 0 -0.0075" name="bottom_site"/>  <!-- Measure from mesh -->
+      <site rgba="0 0 0 0" size="0.005" pos="0 0 0.075" name="top_site"/>
+      <site rgba="0 0 0 0" size="0.005" pos="0.03 0.03 0" name="horizontal_radius_site"/>  <!-- Adjust to actual radius -->
+    </body>
+  </worldbody>
+</mujoco>
