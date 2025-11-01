@@ -1,6 +1,9 @@
 # Read this for objects: https://robosuite.ai/docs/modules/objects.html
 # Especially this section: https://robosuite.ai/docs/modules/objects.html#creating-a-procedurally-generated-object
-
+# this to 'https://robosuite.ai/docs/source/robosuite.environments.manipulation.html#module-robosuite.environments.manipulation.manipulation_env'
+# 'https://community.latenode.com/t/mujoco-custom-object-mesh-flickering-through-table-surface-in-gym-environment/27486'
+# for tuning camer look over 'https://github.com/quantumiracle/robolite/blob/zihan/robosuite/scripts/tune_camera.py'
+# see here for prompt template 'https://github.com/shaunck96/arc_agi/blob/main/solver.py#L169'
 '''
 To design this environment, the idea is taken from '/mujoco_sim/robosuite/robosuite/environments/manipulation/lift.py'
 '''
@@ -22,14 +25,14 @@ from robosuite.utils.transform_utils import convert_quat
 class XObject(MujocoXMLObject):
     def __init__(self, name):
         super().__init__(xml_path_completion("/Users/killuaa/Desktop/mujoco_sim/self_environment/objects/x.xml"),
-                         name=name, joints=[dict(type="free", damping="0.0005")],
-                         obj_type="all", duplicate_collision_geoms=True)
+                         name=name, joints=[dict(type="free", damping="0.0005")], # damping means how quickly the object slows down and eventually stops moving
+                         obj_type="all", duplicate_collision_geoms=True) 
 
 
 class OObject(MujocoXMLObject):
     def __init__(self, name):
         super().__init__(xml_path_completion("/Users/killuaa/Desktop/mujoco_sim/self_environment/objects/o.xml"),
-                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         name=name, joints=[dict(type="free", damping="0.0001")],
                          obj_type="all", duplicate_collision_geoms=True)
 
 
@@ -69,21 +72,22 @@ class TicTacToeEnv(ManipulationEnv):
         placement_initializer=None,
         has_renderer=False,
         has_offscreen_renderer=True,
-        render_camera="frontview",
+        render_camera="robot0_eye_in_hand",
+        # render_camera="frontview", 
         render_collision_mesh=False,
         render_visual_mesh=True,
         render_gpu_device_id=-1,
-        control_freq=20,
+        control_freq=20, # Default control frequency
         lite_physics=True,
         horizon=1000,
         ignore_done=False,
         hard_reset=True,
-        camera_names="agentview",
+        camera_names="frontview",
         camera_heights=256,
         camera_widths=256,
         camera_depths=False,
-        camera_segmentations=None,
-        renderer="mjviewer",
+        camera_segmentations=None, # No segmentation by default
+        renderer="mujoco",
         renderer_config=None,
         seed=None,
     ):
@@ -207,7 +211,7 @@ class TicTacToeEnv(ManipulationEnv):
             XObject(name=f"x_piece_{i}") for i in range(5)
         ]
         self.o_pieces = [
-            OObject(name=f"o_piece_{i}") for i in range(4)
+            OObject(name=f"o_piece_{i}") for i in range(5)
         ]
 
         # Placement initializer: Separate areas for X and O (board is fixed, not sampled)

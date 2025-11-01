@@ -8,7 +8,9 @@
     <body>
       <body name="object">
         <!-- Visual geom: Mesh for appearance, no contacts if static -->
-        <geom pos="0 0 0" mesh="board_mesh" type="mesh" material="board_material" group="1" contype="0" conaffinity="0"/>
+        <geom pos="0 0 0" mesh="board_mesh" type="mesh" material="board_material" group="1" contype="1" conaffinity="1"/>
+        <!-- <geom pos="0 0 0" type="box" size="0.15 0.15 0.05" group="0" rgba="0 0 0 0" condim="4" ... /> -->
+
         <!-- Collision geom: Approximate flat board with box (adjust size) -->
         <geom pos="0 0 0" type="box" size="0.15 0.15 0.05" solimp="0.998 0.998 0.001" solref="0.001 1" density="1000" friction="0.95 0.3 0.1" group="0" condim="4" rgba="0 0 0 0"/>  <!-- Half-lengths: width, depth, height -->
         <inertial pos="0 0 0" mass="0.5" diaginertia="0.01 0.01 0.01"/>  <!-- Higher mass for static; adjust -->
