@@ -9,7 +9,7 @@ import time
 import numpy as np
 from copy import deepcopy
 
-from stl_files_tic_tac import TicTacToeEnv
+from tic_tac import TicTacToeEnv
 from robosuite.devices import Keyboard
 from robosuite.wrappers import VisualizationWrapper
 

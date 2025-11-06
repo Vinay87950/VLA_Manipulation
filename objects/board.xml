@@ -2,7 +2,7 @@
   <asset>
     <mesh file="/Users/killuaa/Desktop/mujoco_sim/self_environment/stl_things/files/Board.stl" name="board_mesh" scale="0.004 0.004 0.004"/>  <!-- Adjust to 0.8 if STL in meters -->
     <texture file="/Users/killuaa/Desktop/mujoco_sim/self_environment/stl_things/images/Part_Studio_1_-_Board_x1.png" type="2d" name="tex-board" />
-    <material name="board_material" reflectance="0.7" rgba="0.1 0.8 0.8 1"/>
+    <material name="board_material" reflectance="0.5" rgba="0.1 0.1 0.1 1"/>
   </asset>
   <worldbody>
     <body>

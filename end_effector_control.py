@@ -1,7 +1,7 @@
 import imageio
 import argparse
 import numpy as np
-from tic_tac import TicTacToeEnv
+from stl_files_tic_tac import TicTacToeEnv
 import robosuite.macros as macros
 # import robosuite as suite
 from robosuite import load_composite_controller_config
@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 '''
 To define the json file for DOF the idea is taken from 'https://github.com/ARISE-Initiative/robosuite/blob/master/robosuite/controllers/config/robots/default_panda.json'
+Define End effector for testing 'https://me336.ancorasir.com/?page_id=584'
 '''
 
 # Path to config file
@@ -52,47 +53,41 @@ if __name__ == "__main__":
 
     env.reset()
 
-    # Function to handle 'v' key press for camera switch
-    def on_key_press(key, mods=None):
-        global current_camera_idx
-        if key == ord('v'):
-            current_camera_idx = (current_camera_idx + 1) % len(camera_cycle)
-            # Update environment camera
-            env.viewer.set_camera(camera_id=env.sim.model.camera_name2id(camera_cycle[current_camera_idx]))
+    ori_pos = []
 
-    # Attach keypress handler to viewer 
-    env.viewer.add_keypress_callback(on_key_press)
-
-    writer = imageio.get_writer(args.video_path, fps=20)
-    frames = []
-    # print(config)
+    def PD_Controller(target, eef_pos, last_eff_pos):
+        p = 8
+        d = 7
+        action = np.zeros(4)
+        target = ori_pos + target
+        action[0:3] = (target - eef_pos) * p - abs(eef_pos - last_eff_pos) * d
+        return action
 
 
-     # Main simulation loop
-    for i in range(args.timesteps):
-        action = np.random.uniform(env.action_spec[0], env.action_spec[1])
+    action = np.zeros(4)
+    eef_pos = np.zeros(3)
+    last_eff_pos = np.zeros(3)
+
+    obs, reward, done, info = env.step(action)
+    eef_pos = obs['robot0_eef_pos'] # position of end effector
+    ori_pos = eef_pos # original position of end effector
+    last_eff_pos = eef_pos
+
+    track = []
+    step = np.pi / 500
+    r = 0.3
+    for i in range(1000):
+        circle = [0, r * np.sin(step * i), r - r * np.cos(step * i)]
+        eef_pos = obs['robot0_eef_pos']
+        action = PD_Controller(circle, eef_pos, last_eff_pos)
+        track = np.append(track, eef_pos - ori_pos)
         obs, reward, done, info = env.step(action)
-        env.render()  # Remove camera_name argument
+        last_eff_pos = eef_pos
+        env.render()
 
-        '''uncomment below to save videos'''
-        # # Grab the frame from the camera that is currently being viewed
-        # if i % args.skip_frame == 0:  # Use the skip_frame argument
-            
-        #     # Get the name of the camera currently shown in the viewer
-        #     current_camera_name = camera_cycle[current_camera_idx]
-            
-        #     # Get the corresponding image from the observation dictionary
-        #     #  (Note: robosuite adds "_image" to the camera name in the obs dict)
-        #     frame = obs[current_camera_name + "_image"] 
-            
-        #     # Add the frame to the video
-        #     writer.append_data(frame)
-        
-
-        if done:
-            env.reset()
-
-    # writer.close()
-    # print(f"Video saved to {args.video_path}")
-
-    
+    env.close()
+        # plot the track
+    track = track.reshape([1000, 3])
+    plt.figure(0)
+    plt.scatter(track[:, 1], track[:, 2])
+    plt.show()

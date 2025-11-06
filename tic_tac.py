@@ -1,5 +1,19 @@
-# read this for objects 'https://robosuite.ai/docs/modules/objects.html'
-# especially this section 'https://robosuite.ai/docs/modules/objects.html#creating-a-procedurally-generated-object
+# Read this for objects: https://robosuite.ai/docs/modules/objects.html
+# Especially this section: https://robosuite.ai/docs/modules/objects.html#creating-a-procedurally-generated-object
+# this to 'https://robosuite.ai/docs/source/robosuite.environments.manipulation.html#module-robosuite.environments.manipulation.manipulation_env'
+# 'https://community.latenode.com/t/mujoco-custom-object-mesh-flickering-through-table-surface-in-gym-environment/27486'
+# for tuning camer look over 'https://github.com/quantumiracle/robolite/blob/zihan/robosuite/scripts/tune_camera.py'
+# see here for prompt template 'https://github.com/shaunck96/arc_agi/blob/main/solver.py#L169'
+# for reward shaping usage 'https://robosuite.ai/docs/modules/environments.html#rewards-and-termination'
+# for action token see this 'https://www.physicalintelligence.company/research/fast'
+
+# see this for DOF understanding for robosuite and getting the idea which one to fixing for my task 'https://robosuite.ai/assets/whitepaper.pdf'
+'''
+To design this environment, the idea is taken from '/mujoco_sim/robosuite/robosuite/environments/manipulation/lift.py'
+
+to print action info refer to 'robosuite/robosuite/scripts/print_robot_action_info.py'
+and to create action vector refere to
+'''
 
 from collections import OrderedDict
 
@@ -7,20 +21,41 @@ import numpy as np
 
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
-from robosuite.models.objects import BoxObject
+from robosuite.models.objects import MujocoXMLObject
 from robosuite.models.tasks import ManipulationTask
-from robosuite.utils.mjcf_utils import CustomMaterial
+from robosuite.utils.mjcf_utils import array_to_string, xml_path_completion
 from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import SequentialCompositeSampler, UniformRandomSampler
 from robosuite.utils.transform_utils import convert_quat
 
 
-class TicTacToe(ManipulationEnv):
+class XObject(MujocoXMLObject):
+    def __init__(self, name):
+        super().__init__(xml_path_completion("/Users/killuaa/Desktop/mujoco_sim/self_environment/objects/x.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")], # damping means how quickly the object slows down and eventually stops moving
+                         obj_type="all", duplicate_collision_geoms=True) 
+
+
+class OObject(MujocoXMLObject):
+    def __init__(self, name):
+        super().__init__(xml_path_completion("/Users/killuaa/Desktop/mujoco_sim/self_environment/objects/o.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
+
+
+class BoardObject(MujocoXMLObject):
+    def __init__(self, name):
+        super().__init__(xml_path_completion("/Users/killuaa/Desktop/mujoco_sim/self_environment/objects/board.xml"),
+                         name=name, joints=None,
+                         obj_type="all", duplicate_collision_geoms=True)
+
+
+class TicTacToeEnv(ManipulationEnv):
     """
     This class corresponds to a Tic Tac Toe task for a single robot arm (Franka Panda).
 
-    The environment sets up a table with red boxes as X pieces and blue boxes as O pieces.
-    Pieces are initially placed on the sides for the robot to pick and place on a virtual 3x3 grid.
+    The environment sets up a table with custom X and O pieces from XML meshes, placed on a static custom board.
+    Pieces are initially placed on one of the side for the robot to pick and place on a virtual 3x3 grid on the board.
     Rewards encourage grasping and placing; success checks for placement on the grid.
     Game logic (turns, wins) can be extended in overrides.
 
@@ -35,8 +70,8 @@ class TicTacToe(ManipulationEnv):
         gripper_types="default",
         base_types="default",
         initialization_noise="default",
-        table_full_size=(1.0, 1.0, 0.05),  # Larger table for grid and pieces
-        table_friction=(1.0, 5e-3, 1e-4),
+        table_full_size=(1.1, 1.1, 0.05),  # Larger table for grid and pieces
+        table_friction=(1.0, 5e-3, 1e-4),  #1.0, 5e-3, 1e-4), is a tuple that specifies (sliding, torsional, rolling) friction coefficients
         use_camera_obs=True,
         use_object_obs=True,
         reward_scale=1.0,
@@ -44,37 +79,34 @@ class TicTacToe(ManipulationEnv):
         placement_initializer=None,
         has_renderer=False,
         has_offscreen_renderer=True,
-        render_camera="frontview",
+        render_camera="robot0_eye_in_hand",
+        # render_camera="frontview", 
         render_collision_mesh=False,
         render_visual_mesh=True,
-        render_gpu_device_id=-1,
-        control_freq=20,
+        render_gpu_device_id=0, # set to your CPU ID, -1 is for GPU's or Cuda devices
+        control_freq=20, # Default control frequency
         lite_physics=True,
         horizon=1000,
         ignore_done=False,
         hard_reset=True,
-        camera_names="agentview",
+        camera_names="frontview",
         camera_heights=256,
         camera_widths=256,
         camera_depths=False,
-        camera_segmentations=None,
-        renderer="mjviewer",
+        camera_segmentations=None, # No segmentation by default
+        renderer="mujoco",
         renderer_config=None,
         seed=None,
     ):
         # Tic Tac Toe specific settings
         self.table_full_size = table_full_size
         self.table_friction = table_friction
-        self.table_offset = np.array((0, 0, 0.8))
-        self.table_top_z = self.table_offset[2] + self.table_full_size[2] / 2
+        self.table_offset = np.array((0, 0, 0.8)) # this set the position of table in center for simulation
+        self.table_top = self.table_offset + np.array([0, 0, self.table_full_size[2] / 2]) # coordinate of table top surface
 
-        # Define virtual 3x3 grid centers (spacing 0.06m, piece size 0.025)
-        self.grid_size = 0.06
-        self.piece_size = [0.025, 0.025, 0.025]
-        self.grid_centers = [
-            np.array([(i - 1) * self.grid_size, (j - 1) * self.grid_size, self.table_top_z + self.piece_size[2]])
-            for i in range(3) for j in range(3)
-        ]
+        # Grid will be computed dynamically based on board sites
+        self.grid_spacing = None
+        self.grid_centers = None
 
         # Reward configuration
         self.reward_scale = reward_scale
@@ -119,40 +151,53 @@ class TicTacToe(ManipulationEnv):
         """
         Reward function: Sparse for placement on grid, shaped for reaching/grasping if enabled.
         """
-        reward = 0.0
+        # Initialize reward
+        reward = 0
 
-        # Check if any piece is placed on a grid center
-        if self._check_success():
-            reward = 2.0  # Sparse reward for successful placement
+        # Win/loss/tie rewards (large and sparse)
+        # Player 1 is 'X' (value 1), Player 2 is 'O' (value 2)
+        if self._check_win(player=1):  # 'X' wins
+            reward = 10.0
+        elif self._check_win(player=2):  # 'O' wins
+            reward = -10.0
+        elif np.count_nonzero(self._get_board_state()) == 9:  # Board is full, it's a tie
+            reward = 5.0
 
+        # Intermediate rewards for shaping
         if self.reward_shaping:
-            # Example shaping: Distance to nearest unused piece
+            # Placement reward: give a small reward for successfully placing a piece on the board.
+            # This encourages the agent to complete the sub-task of placing pieces.
+            if self._check_success():
+                reward += 1.0
+
+            # Reaching reward: encourage gripper to move towards the nearest 'X' piece.
             min_dist = np.inf
-            for piece in self.x_pieces:  # Assuming robot places X
+            # Assuming the robot's goal is to place 'X' pieces
+            for piece in self.x_pieces:
                 dist = self._gripper_to_target(
                     gripper=self.robots[0].gripper, target=piece.root_body, target_type="body", return_distance=True
                 )
                 min_dist = min(min_dist, dist)
             reaching_reward = 1 - np.tanh(10.0 * min_dist)
-            reward += reaching_reward
+            reward += 0.1 * reaching_reward # Scale down to not overpower other rewards
 
-            # Grasping bonus
+            # Grasping bonus: give a small reward for grasping a piece.
             grasped = False
             for piece in self.x_pieces:
-                if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=piece):
+                if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=piece.contact_geoms):
                     grasped = True
                     break
             if grasped:
-                reward += 0.25
+                reward += 0.5
 
         if self.reward_scale is not None:
-            reward *= self.reward_scale / 2.0
+            reward *= self.reward_scale
 
         return reward
 
     def _load_model(self):
         """
-        Loads the model: Arena, robot, and multiple pieces for X and O.
+        Loads the model: Arena, robot, static board, and multiple pieces for X and O.
         """
         super()._load_model()
 
@@ -168,43 +213,28 @@ class TicTacToe(ManipulationEnv):
         )
         mujoco_arena.set_origin([0, 0, 0])
 
-        # Materials for pieces
-        tex_attrib = {"type": "cube"}
-        mat_attrib = {"texrepeat": "1 1", "specular": "0.4", "shininess": "0.1"}
-        red_mat = CustomMaterial(
-            texture="WoodRed",
-            tex_name="redwood",
-            mat_name="red_mat",
-            tex_attrib=tex_attrib,
-            mat_attrib=mat_attrib,
-        )
-        blue_mat = CustomMaterial(
-            texture="WoodBlue",  # Assume a blue texture; adjust if needed
-            tex_name="bluewood",
-            mat_name="blue_mat",
-            tex_attrib=tex_attrib,
-            mat_attrib=mat_attrib,
-        )
+        # Create board (static)
+        self.board = BoardObject(name="board")
 
-        # Create pieces
+        # Merge board into arena as static object
+        mujoco_arena.merge_assets(self.board)
+        board_obj = self.board.get_obj()
+        # Calculate position to be on top of the table
+        # self.table_top is the absolute z-coordinate of the table surface
+        # We set the board's z-position directly to the table's top surface height.
+        pos = np.array([-0.15, 0.10, self.table_top[2]]) # Move 0.10m (10cm) to the rigth and -0.15m (15cm) left in y axis
+        board_obj.set("pos", array_to_string(pos))
+        mujoco_arena.worldbody.append(board_obj) # The board is static and centered at (0,0) on the table
+
+        # Create pieces (dynamic)
         self.x_pieces = [
-            BoxObject(
-                name=f"x_piece_{i}",
-                size=self.piece_size,
-                rgba=[1, 0, 0, 1],
-                material=red_mat,
-            ) for i in range(5)
+            XObject(name=f"x_piece_{i}") for i in range(5)
         ]
         self.o_pieces = [
-            BoxObject(
-                name=f"o_piece_{i}",
-                size=self.piece_size,
-                rgba=[0, 0, 1, 1],
-                material=blue_mat,
-            ) for i in range(4)
+            OObject(name=f"o_piece_{i}") for i in range(5)
         ]
 
-        # Placement initializer: Separate areas for X and O
+        # Placement initializer: Separate areas for X and O (board is fixed, not sampled)
         if self.placement_initializer is None:
             self.placement_initializer = SequentialCompositeSampler(name="PieceSampler")
             # Left side for X
@@ -212,8 +242,8 @@ class TicTacToe(ManipulationEnv):
                 sampler=UniformRandomSampler(
                     name="XSampler",
                     mujoco_objects=self.x_pieces,
-                    x_range=[-0.45, -0.25],
-                    y_range=[-0.25, 0.25],
+                    x_range=[0.45, 0.25],
+                    y_range=[-0.45, 0.25],
                     rotation=None,
                     ensure_object_boundary_in_range=True,
                     ensure_valid_placement=True,
@@ -226,18 +256,17 @@ class TicTacToe(ManipulationEnv):
                 sampler=UniformRandomSampler(
                     name="OSampler",
                     mujoco_objects=self.o_pieces,
-                    x_range=[0.25, 0.45],
+                    x_range=[0.25, 0.25],
                     y_range=[-0.25, 0.25],
                     rotation=None,
                     ensure_object_boundary_in_range=True,
                     ensure_valid_placement=True,
                     reference_pos=self.table_offset,
-                    z_offset=0.03
-                      # Slightly above table to avoid sinking
+                    z_offset=0.03  # Slightly above table to avoid sinking
                 )
             )
 
-        # Task model
+        # Task model (pieces only, board is part of arena)
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
@@ -246,11 +275,14 @@ class TicTacToe(ManipulationEnv):
 
     def _setup_references(self):
         """
-        Sets up references to piece bodies.
+        Sets up references to piece bodies and board, the body_name2id is used to get the unique numeric ID corresponding to each body name in the physical simulation
+        that means, it is the standard way in MuJoCo to go from human-readable names to internal numeric IDs.
+        .
         """
         super()._setup_references()
         self.x_body_ids = [self.sim.model.body_name2id(p.root_body) for p in self.x_pieces]
         self.o_body_ids = [self.sim.model.body_name2id(p.root_body) for p in self.o_pieces]
+        self.board_body_id = self.sim.model.body_name2id(self.board.root_body)
 
     def _setup_observables(self):
         """
@@ -296,7 +328,7 @@ class TicTacToe(ManipulationEnv):
 
     def _reset_internal(self):
         """
-        Resets object positions using the initializer.
+        Resets object positions using the initializer and computes dynamic grid centers based on board.
         """
         super()._reset_internal()
 
@@ -304,6 +336,18 @@ class TicTacToe(ManipulationEnv):
             object_placements = self.placement_initializer.sample()
             for obj_pos, obj_quat, obj in object_placements.values():
                 self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+
+        # Compute grid centers dynamically based on board and piece sites
+        self.board_pos = self.sim.data.body_xpos[self.board_body_id]
+        self.board_top_offset = self.board.top_offset
+        self.piece_bottom_offset = self.x_pieces[0].bottom_offset  # Assume same for O
+        self.board_horizontal_radius = self.board.horizontal_radius
+        self.grid_spacing = (2 * self.board_horizontal_radius) / 3
+        self.grid_centers = [
+            self.board_pos + np.array([(i - 1) * self.grid_spacing, (j - 1) * self.grid_spacing, 0]) +
+            self.board_top_offset - self.piece_bottom_offset
+            for i in range(3) for j in range(3)
+        ]
 
     def visualize(self, vis_settings):
         """
@@ -323,9 +367,7 @@ class TicTacToe(ManipulationEnv):
         for body_id in all_body_ids:
             pos = self.sim.data.body_xpos[body_id]
             for grid_pos in self.grid_centers:
-                offset = np.array(self.table_offset[:2].tolist() + [0])  # [0.0, 0.0, 0.0]
-                grid_abs = grid_pos + offset
-                if np.linalg.norm(pos - grid_abs) < 0.03:  # Tolerance
+                if np.linalg.norm(pos - grid_pos) < 0.03:  # Tolerance
                     placed = True
                     break
         return placed
@@ -339,13 +381,12 @@ class TicTacToe(ManipulationEnv):
         board = np.zeros((3, 3), dtype=int)
         for idx, grid_pos in enumerate(self.grid_centers):
             i, j = divmod(idx, 3)
-            grid_abs = grid_pos + self.table_offset  # Absolute position
             for x_id in self.x_body_ids:
-                if np.linalg.norm(self.sim.data.body_xpos[x_id] - grid_abs) < 0.03:
+                if np.linalg.norm(self.sim.data.body_xpos[x_id] - grid_pos) < 0.03:
                     board[i, j] = 1
                     break
             for o_id in self.o_body_ids:
-                if np.linalg.norm(self.sim.data.body_xpos[o_id] - grid_abs) < 0.03:
+                if np.linalg.norm(self.sim.data.body_xpos[o_id] - grid_pos) < 0.03:
                     board[i, j] = 2
                     break
         return board

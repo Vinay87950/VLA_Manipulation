@@ -9,9 +9,8 @@
       <body name="object">
         <!-- Visual geom: Mesh for appearance, no contacts -->
         <geom pos="0 0 0" mesh="x_mesh" type="mesh" material="x_material" group="1" contype="1" conaffinity="1"/>
-        <!-- Collision geoms: Approximate X with two crossed boxes for convexity (adjust sizes/positions) -->
-        <geom pos="0 0 0" type="box" size="0.1 0.01 0.0075" solimp="0.998 0.998 0.001" solref="0.001 1" density="1000" friction="0.95 0.3 0.1" group="0" condim="4" rgba="0 0 0 0"/>  <!-- Horizontal bar -->
-        <geom pos="0 0 0" type="box" size="0.01 0.1 0.0075" solimp="0.998 0.998 0.001" solref="0.001 1" density="1000" friction="0.95 0.3 0.1" group="0" condim="4" rgba="0 0 0 0"/>  <!-- Vertical bar -->
+        <!-- Collision geom: A single box to approximate the 'X' shape for stability. -->
+        <geom pos="0 0 0" type="box" size="0.05 0.05 0.0075" solimp="0.998 0.998 0.001" solref="0.001 1" density="1000" friction="0.95 0.3 0.1" group="0" condim="4" rgba="0 0 0 0"/>
         <inertial pos="0 0 0" mass="0.1" diaginertia="0.001 0.001 0.001"/>  <!-- Explicit inertia for stability; adjust mass -->
       </body>
       <site rgba="0 0 0 0" size="0.005" pos="0 0 -0.0075" name="bottom_site"/>  <!-- Adjust based on actual bottom -->
