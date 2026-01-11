@@ -10,6 +10,7 @@ import numpy as np
 from copy import deepcopy
 
 from tic_tac import TicTacToeEnv
+# from test_tic_tac import TicTacToeEnv
 from robosuite.devices import Keyboard
 from robosuite.wrappers import VisualizationWrapper
 
