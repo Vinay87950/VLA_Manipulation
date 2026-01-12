@@ -10,9 +10,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
 sys.path.append(root_dir)
 
-# Add local robosuite to path to use the custom source version
-robosuite_path = os.path.join(root_dir, "robosuite")
-sys.path.insert(0, robosuite_path)
+# # Add local robosuite to path to use the custom source version
+# robosuite_path = os.path.join(root_dir, "robosuite")
+# sys.path.insert(0, robosuite_path)
 
 from robosuite.controllers import load_composite_controller_config
 # Load Controller Config (Must match training!)
@@ -60,7 +60,7 @@ def evaluate():
         env = TicTacToeEnv(
             robots=["Panda"],
             has_renderer=True,           # ENABLE RENDERER
-            render_camera="frontview",   # Optional: "frontview", "agentview"
+            render_camera="robot0_eye_in_hand",   # Optional: "frontview", "agentview"
             controller_configs=config,
             use_camera_obs=False,
             use_object_obs=True,

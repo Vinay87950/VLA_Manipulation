@@ -8,12 +8,12 @@ import gymnasium as gym
 # Add parent directory to path to allow importing self_environment
 # Assumes this script is in self_environment/training/
 current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
+root_dir = os.path.abspath(os.path.join(current_dir, "../"))
 sys.path.append(root_dir)
 
-# Add local robosuite to path to use the custom source version
-robosuite_path = os.path.join(root_dir, "robosuite")
-sys.path.insert(0, robosuite_path)
+# # Add local robosuite to path to use the custom source version
+# robosuite_path = os.path.join(root_dir, "robosuite")
+# sys.path.insert(0, robosuite_path)
 from robosuite.controllers import load_composite_controller_config
 controller_fpath = "/Users/killuaa/Desktop/mujoco_sim/self_environment/DOF/6_dof.json"
 config = load_composite_controller_config(controller=controller_fpath)
