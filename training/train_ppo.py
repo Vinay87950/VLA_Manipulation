@@ -22,7 +22,7 @@ try:
     from stable_baselines3 import PPO
     from stable_baselines3.common.callbacks import CheckpointCallback
     from stable_baselines3.common.monitor import Monitor
-    from stable_baselines3.common.vec_env import DummyVecEnv
+    from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
     from stable_baselines3.common.utils import set_random_seed
 except ImportError:
     print("Error: stable-baselines3 is not installed. Please run: pip install stable-baselines3")
@@ -39,7 +39,7 @@ except ImportError as e:
 TRAIN_TIMESTEPS = 100_000
 SAVE_FREQ = 10_000
 SEED = 42
-NUM_ENVS = 1 # Set to >1 for parallel training (requires SubprocVecEnv)
+NUM_ENVS = 1 # Set to >1 for parallel training (Requires SubprocVecEnv, which is faster)
 LOG_DIR = os.path.join(current_dir, "logs")
 MODEL_DIR = os.path.join(current_dir, "models")
 
@@ -86,7 +86,11 @@ if __name__ == "__main__":
     set_random_seed(SEED)
     
     # Create Vectorized Environment
-    env = DummyVecEnv([make_env(i, SEED) for i in range(NUM_ENVS)])
+    vec_env_cls = SubprocVecEnv if NUM_ENVS > 1 else DummyVecEnv
+    env = vec_env_cls([make_env(i, SEED) for i in range(NUM_ENVS)])
+    
+    # Normalize observations and rewards (Crucial for PPO performance)
+    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.)
     
     # Initialize PPO
     # MlpPolicy is standard for state-based observations
@@ -97,11 +101,12 @@ if __name__ == "__main__":
         tensorboard_log=LOG_DIR,
         learning_rate=3e-4,
         n_steps=2048,
-        batch_size=64,
+        batch_size=256,
         n_epochs=10,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
+        device="cpu",
     )
     
     # Callbacks
@@ -125,7 +130,13 @@ if __name__ == "__main__":
         model.save(final_path)
         print(f"Model saved to {final_path}")
         
+        # Save Normalization Stats
+        final_norm_path = os.path.join(MODEL_DIR, "tic_tac_ppo_final_vecnormalize.pkl")
+        env.save(final_norm_path)
+        print(f"Normalization stats saved to {final_norm_path}")
+        
     except KeyboardInterrupt:
         print("\nTraining interrupted manually. Saving current model...")
         model.save(os.path.join(MODEL_DIR, "tic_tac_ppo_interrupted"))
+        env.save(os.path.join(MODEL_DIR, "tic_tac_ppo_interrupted_vecnormalize.pkl"))
 

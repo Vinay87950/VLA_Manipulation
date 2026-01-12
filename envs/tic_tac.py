@@ -26,6 +26,8 @@ from robosuite.utils.mjcf_utils import CustomMaterial
 from robosuite.utils.mjcf_utils import array_to_string
 from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.transform_utils import convert_quat
+from robosuite.utils.placement_samplers import SequentialCompositeSampler, UniformRandomSampler
+import robosuite.utils.transform_utils as T
 
 class TicTacToeEnv(ManipulationEnv):
     def __init__(
@@ -55,7 +57,7 @@ class TicTacToeEnv(ManipulationEnv):
         render_gpu_device_id=0,
         control_freq=20,
         lite_physics=True,
-        horizon=1000,
+        horizon=500,
         ignore_done=False,
         hard_reset=True,
         camera_names="frontview",
@@ -102,6 +104,9 @@ class TicTacToeEnv(ManipulationEnv):
         self.reward_shaping = reward_shaping
         self.use_object_obs = use_object_obs
         self.grid_centers = []
+        
+        # placement initializer
+        self.placement_initializer = placement_initializer
 
 
         super().__init__(
@@ -138,92 +143,180 @@ class TicTacToeEnv(ManipulationEnv):
         self.current_player = 1  # Start with agent (X)
         self.timestep = 0
 
-    # Stage 1: Reach → Stage 2: Grasp → Stage 3: Lift → Stage 4: Transport → Stage 5: Place
     def reward(self, action=None):
         """
-        Picking up pieces (X or O) and placing them into empty grid cells.
-        
-        Reward Components (Un-normalized):
-        
-          - Reaching [0, 0.5]: Proportional to distance between gripper and the current target piece.
-          - Grasping {0, 0.5}: Binary reward if the correct piece is grasped.
-          - Lifting [0, 1.0]: Proportional to the height of the lifted piece (max at 0.1m).
-          - Transport [0, 1.0]: Proportional to distance between gripper and the CLOSEST EMPTY grid cell.
-          - Placing {0, 2.0}: Binary reward if piece is successfully placed in a valid, empty cell.
-          
-        Total Shaping Reward Max: ~5.0 per step (if all conditions met perfectly).
-        
-        Success Bonus:
-          - +5.0 explicitly added in step() when a piece is successfully placed and turn ends.
-          
-        Args:
-            action (np.array): [NOT USED]
-            
-        Returns:
-            float: reward value
+        Reward function for the task.
         """
-        reward = 0.0
-
-        gripper = self._get_gripper()
+        r_reach, r_orient, r_open, r_grasp, r_lift, r_transport, r_place = self.staged_rewards()
+        reward = r_reach + r_orient + r_open + r_grasp + r_lift + r_transport + r_place
         
-        # In Solitaire mode, we don't punish/reward winning/losing the same way.
-        # We process step-based rewards.
-
-        # reward shaping
-        if self.reward_shaping:
-            current_piece = self._get_current_piece()
-            if current_piece is None:
-                return reward  # Early exit if no piece
-
-            # STAGE 1: Reaching
-            reach_dist = self._gripper_to_target(
-                gripper=gripper,
-                target=current_piece.root_body,
-                target_type="body",
-                return_distance=True
-            )
-            reaching_reward = 0.5 * (1 - np.tanh(10.0 * reach_dist))
-            reward += reaching_reward
-
-            # STAGE 2: Grasping
-            if self._check_grasp(gripper=gripper, object_geoms=current_piece):
-                reward += 0.5
-
-            # STAGE 3: Lifting
-            piece_height = self._get_piece_height(current_piece)
-            lifting_reward = min(1.0, piece_height / 0.1)
-            reward += lifting_reward
-
-            # STAGE 4: Transport to Valid Grid
-            if piece_height > 0.05:
-                # Find closest EMPTY grid center
-                board_state = self._get_board_state().flatten()
-                empty_indices = [i for i, state in enumerate(board_state) if state == 0]
-                
-                if empty_indices:
-                    grip_pos = self.sim.data.site_xpos[self.sim.model.site_name2id(gripper.important_sites["grip_site"])]
-                    
-                    min_dist = float("inf")
-                    for idx in empty_indices:
-                        target = self.grid_centers[idx].copy()
-                        target[2] += 0.05 # Target slightly above
-                        d = np.linalg.norm(grip_pos - target)
-                        if d < min_dist:
-                            min_dist = d
-                            
-                    transport_reward = 1.0 * (1 - np.tanh(5.0 * min_dist))
-                    reward += transport_reward
-
-            # STAGE 5: Placing (Reward if it looks like it's in a good spot)
-            # note: ACTUAL success reward is handled in step()
-            if self._piece_placed_in_valid_cell(current_piece):
-                reward += 2.0
-
-        # Scale at the end (if applicable)
         if self.reward_scale:
             reward *= self.reward_scale / 5.0
-
+            
         return reward
+
+    def staged_rewards(self):
+        """
+        Returns staged rewards based on current physical states.
+        stages consist of reaching, grasping, lifting, and placing.
+
+        Returns:
+            7-tuple:
+                - (float) reaching reward
+                - (float) orientation reward
+                - (float) gripper open reward
+                - (float) grasping reward
+                - (float) lifting reward
+                - (float) transport reward
+                - (float) placing reward
+        """
+        
+        reach_mult = 0.3
+        orient_mult = 0.1
+        open_mult = 0.1
+        grasp_mult = 0.5
+        lift_mult = 1.0
+        transport_mult = 1.0
+        place_mult = 2.0
+        
+        r_reach = 0.0
+        r_orient = 0.0
+        r_open = 0.0
+        r_grasp = 0.0
+        r_lift = 0.0
+        r_transport = 0.0
+        r_place = 0.0
+
+        current_piece = self._get_current_piece()
+        if current_piece is None:
+            return r_reach, r_orient, r_open, r_grasp, r_lift, r_transport, r_place
+
+        gripper = self._get_gripper()
+
+        # STAGE 1: Reaching
+        reach_dist = self._gripper_to_target(
+            gripper=gripper,
+            target=current_piece.root_body,
+            target_type="body",
+            return_distance=True
+        )
+        # Relaxed scaling (5.0 instead of 10.0)
+        r_reach = (1 - np.tanh(5.0 * reach_dist)) * reach_mult
+
+        # STAGE 1.5: Orientation (Encourage gripper to point down)
+        # Get gripper Z axis in world frame
+        # We assume "down" is -Z (0, 0, -1)
+        gripper_site_id = self.sim.model.site_name2id(gripper.important_sites["grip_site"])
+        gripper_mat = self.sim.data.site_xmat[gripper_site_id].reshape(3, 3)
+        gripper_z = gripper_mat[:, 2] # Z-axis of gripper
+        # Dot product with world -Z (0, 0, -1) -> this should be 1 if perfectly aligned
+        z_dot = -gripper_z[2] 
+        if z_dot > 0:
+            r_orient = (z_dot ** 2) * orient_mult
+
+        # STAGE 1.6: Gripper Open (Encourage opening when near but not grasping)
+        if reach_dist < 0.1 and not self._check_grasp(gripper=gripper, object_geoms=current_piece):
+            # Proportional to how open the fingers are
+            # gripper.current_action contains the last action sent, normalized [-1, 1] usually
+            # But better to check joint positions if possible. 
+            # Robosuite grippers have `current_action` property which tracks input
+            
+            # Simple heuristic: Reward if current control input is "open" (-1)
+            # Depending on gripper config, -1 might be open or closed. Usually -1 is open for Robosuite grippers (Standard).
+            # Let's assume -1 is open.
+            
+            # Actually, let's look at joint positions for robustness if we can, but checking action is easier.
+            # Giving a small reward constant if we "want" to be open
+            r_open = open_mult
+
+        # STAGE 2: Grasping
+        if self._check_grasp(gripper=gripper, object_geoms=current_piece):
+            r_grasp = grasp_mult
+
+        # STAGE 3: Lifting
+        piece_height = self._get_piece_height(current_piece)
+        if r_grasp > 0.0:
+            r_lift = min(1.0, piece_height / 0.1) * lift_mult
+
+        # STAGE 4: Transport to Valid Grid
+        if r_lift > 0.0 and piece_height > 0.05:
+            # Find closest EMPTY grid center
+            board_state = self._get_board_state().flatten()
+            empty_indices = [i for i, state in enumerate(board_state) if state == 0]
+            
+            if empty_indices:
+                grip_pos = self.sim.data.site_xpos[self.sim.model.site_name2id(gripper.important_sites["grip_site"])]
+                
+                min_dist = float("inf")
+                for idx in empty_indices:
+                    target = self.grid_centers[idx].copy()
+                    target[2] += 0.05 # Target slightly above
+                    d = np.linalg.norm(grip_pos - target)
+                    if d < min_dist:
+                        min_dist = d
+                        
+                r_transport = (1 - np.tanh(5.0 * min_dist)) * transport_mult
+
+        # STAGE 5: Placing
+        if self._piece_placed_in_valid_cell(current_piece):
+            r_place = place_mult
+
+        return r_reach, r_orient, r_open, r_grasp, r_lift, r_transport, r_place
+
+    def _get_placement_initializer(self):
+        """
+        Helper function for defining placement initializer and object sampling bounds.
+        """
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+
+        # Define bounds for Table 1 (Piece Table) where we want to spawn pieces
+        # self.piece_table_offset is center of Table 1
+        # Table size is self.table_full_size (x, y, z)
+        
+        # We want to spawn on the surface of Table 1
+        # Let's define a region on Table 1 for X pieces and O pieces
+        
+        # X pieces area (left side of table 1)
+        x_x_range = [-0.15, -0.05] # Relative to table center
+        x_y_range = [-0.2, 0.2]
+        
+        # O pieces area (right side of table 1)
+        o_x_range = [0.05, 0.15]
+        o_y_range = [-0.2, 0.2]
+        
+        # Create sampler for X pieces
+        for i, piece in enumerate(self.x_pieces):
+            self.placement_initializer.append_sampler(
+                sampler=UniformRandomSampler(
+                    name=f"X_Piece_{i}_Sampler",
+                    mujoco_objects=piece,
+                    x_range=x_x_range,
+                    y_range=x_y_range,
+                    rotation=0.0,
+                    rotation_axis="z",
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=self.piece_table_offset,
+                    z_offset=0.02, # Small offset to sit on table
+                )
+            )
+
+        # Create sampler for O pieces
+        for i, piece in enumerate(self.o_pieces):
+            self.placement_initializer.append_sampler(
+                sampler=UniformRandomSampler(
+                    name=f"O_Piece_{i}_Sampler",
+                    mujoco_objects=piece,
+                    x_range=o_x_range,
+                    y_range=o_y_range,
+                    rotation=0.0,
+                    rotation_axis="z",
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=self.piece_table_offset,
+                    z_offset=0.02,
+                )
+            )
 
     def _load_model(self):
         super()._load_model()
@@ -306,6 +399,9 @@ class TicTacToeEnv(ManipulationEnv):
                 mujoco_robots=[robot.robot_model for robot in self.robots],
                 mujoco_objects=all_objects,
             )
+
+        # Generate placement initializer
+        self._get_placement_initializer()
 
     def _setup_references(self):
         super()._setup_references()
@@ -398,15 +494,15 @@ class TicTacToeEnv(ManipulationEnv):
                 center = np.array([self.board_pos[0] + x_offset, self.board_pos[1] + y_offset, z_top])
                 self.grid_centers.append(center)
 
-        # Place X pieces on Piece Table (Table 1)
-        # Table 1 pos is approx self.piece_table_offset
-        # We spawn them relative to that
-        x_start = self.piece_table_offset + np.array([-0.10, -0.15, 0.05])
-        self._place_pieces_manually(self.x_pieces, x_start, offset_step=np.array([0, 0.06, 0]))
+        if not self.deterministic_reset:
+            # Sample from the placement initializer for all objects
+            object_placements = self.placement_initializer.sample()
 
-        # Place O pieces on Piece Table
-        o_start = self.piece_table_offset + np.array([0.10, -0.15, 0.05])
-        self._place_pieces_manually(self.o_pieces, o_start, offset_step=np.array([0, 0.06, 0]))
+            # Loop through all objects and reset their positions
+            for obj_pos, obj_quat, obj in object_placements.values():
+                # Set the collision object joints
+                # Note: This assumes pieces have a single free joint (which they do in _load_model)
+                self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
 
         self.sim.forward()
 
@@ -475,19 +571,7 @@ class TicTacToeEnv(ManipulationEnv):
         
         return components
 
-    def _place_pieces_manually(self, pieces, start_pos, offset_step):
-        for i, piece in enumerate(pieces):
-            pos = start_pos + (i * offset_step)
-            quat = np.array([1, 0, 0, 0]) 
 
-            if hasattr(piece, "joint_names") and piece.joint_names:
-                joint_name = piece.joint_names[0]
-            else:
-                joint_name = f"{piece.name}_joint0"
-
-            joint_id = self.sim.model.joint_name2id(joint_name)
-            qpos_addr = self.sim.model.jnt_qposadr[joint_id]
-            self.sim.data.qpos[qpos_addr : qpos_addr + 7] = np.concatenate([pos, quat])
 
 
     def _get_board_state(self):
@@ -521,9 +605,14 @@ class TicTacToeEnv(ManipulationEnv):
         return np.all(board != 0) and not self._check_win(1) and not self._check_win(2)
 
     def _check_success(self):
-        # 0 -> Player 1 (X), 1 -> Player 2 (O)
-        my_player = 1 if self.object_id == 0 else 2
-        return self._check_win(my_player)
+        """
+        Check if the task is successfully completed.
+        For manipulation/pick-place, we defined success as placing a valid piece.
+        """
+        current_piece = self._get_current_piece()
+        if current_piece and self._piece_placed_in_valid_cell(current_piece):
+            return True
+        return False
 
     def _check_done(self):
         """Helper to calculate if the episode is over."""
@@ -667,4 +756,20 @@ class TicTacToeEnv(ManipulationEnv):
         return False
 
     def visualize(self, vis_settings):
+        """
+        In addition to super call, visualize gripper site proportional to the distance to the closest object.
+        """
+        # Run superclass method first
         super().visualize(vis_settings=vis_settings)
+
+        # Color the gripper visualization site according to its distance to the closest object
+        if vis_settings.get("grippers"):
+            gripper = self._get_gripper()
+            current_piece = self._get_current_piece()
+            
+            if current_piece:
+                self._visualize_gripper_to_target(
+                    gripper=gripper,
+                    target=current_piece.root_body,
+                    target_type="body",
+                )

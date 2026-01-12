@@ -21,6 +21,7 @@ config = load_composite_controller_config(controller=controller_fpath)
 
 try:
     from stable_baselines3 import PPO
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
     from robosuite.wrappers.gym_wrapper import GymWrapper
     from self_environment.envs.test_tic_tac import TicTacToeEnv
 except ImportError as e:
@@ -53,48 +54,70 @@ def evaluate():
     model = PPO.load(model_path)
 
     # Create Environment (With Renderer!)
-    env = TicTacToeEnv(
-        robots=["Panda"],
-        has_renderer=True,           # ENABLE RENDERER
-        render_camera="frontview",   # Optional: "frontview", "agentview"
-        controller_configs=config,
-        use_camera_obs=False,
-        use_object_obs=True,
-        control_freq=20,
-        horizon=1000,
-        ignore_done=False,
-        reward_shaping=True,
-    )
+    # We need to recreate the exact GymWrapper -> DummyVecEnv -> VecNormalize stack
     
-    # Wrap environment exactly as in training
-    env = GymWrapper(env, flatten_obs=True)
+    def make_eval_env():
+        env = TicTacToeEnv(
+            robots=["Panda"],
+            has_renderer=True,           # ENABLE RENDERER
+            render_camera="frontview",   # Optional: "frontview", "agentview"
+            controller_configs=config,
+            use_camera_obs=False,
+            use_object_obs=True,
+            control_freq=20,
+            horizon=500,
+            ignore_done=False,
+            reward_shaping=True,
+        )
+        return GymWrapper(env, flatten_obs=True)
+
+    # 1. Create VecEnv
+    # We create a dummy env to inspect/set render_mode if needed
+    dummy_env = make_eval_env()
+    dummy_env.render_mode = "human" # Fixes the warning
+    env = DummyVecEnv([lambda: dummy_env])
+
+    # 2. Load Normalization Stats (If available)
+    # The stats file usually has the same name style but with another extension or suffix
+    # In train_ppo.py we explicitly named it:
+    norm_path = model_path.replace(".zip", "_vecnormalize.pkl")
+    
+    if os.path.exists(norm_path):
+        print(f"Loading normalization stats from: {norm_path}")
+        env = VecNormalize.load(norm_path, env)
+        # IMPORTANT: Disable training mode during evaluation and reward normalization
+        env.training = False
+        env.norm_reward = False
+    else:
+        print("Warning: No normalization stats found. Running without normalization (performance might be poor if model was trained with it).")
 
     print("Starting Evaluation...")
     print("Press Ctrl+C to stop.")
 
     for episode in range(NUM_EPISODES):
-        obs, _ = env.reset()
+        obs = env.reset() # VecEnv reset returns just obs
         done = False
         total_reward = 0
         step = 0
         
         print(f"--- Episode {episode + 1} ---")
         
+        # VecEnv loop usually handles things differently (array of obs), but with DummyVecEnv size 1:
         while not done:
             # Predict action
             action, _states = model.predict(obs, deterministic=True)
             
             # Step env
-            obs, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            total_reward += reward
+            # VecEnv returns: obs, rewards, dones, infos
+            obs, reward, dones, infos = env.step(action)
+            
+            # Since we have 1 env, extract scalars
+            done = dones[0]
+            total_reward += reward[0]
             step += 1
             
-            # Render is handled by the env's internal viewer since has_renderer=True
+            # Render
             env.render()
-            
-            # Slow down slightly for viewing pleasure if needed (Robosuite viewer usually handles sync)
-            # time.sleep(0.01) 
             
         print(f"Episode finished. Steps: {step}, Total Reward: {total_reward:.2f}")
 
